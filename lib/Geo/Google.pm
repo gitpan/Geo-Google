@@ -121,13 +121,13 @@ send a patch.  Known bugs/issues:
 package Geo::Google;
 use strict;
 use warnings;
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 #this gets a javascript page containing map XML
-use constant LQ => 'http://maps.google.com/maps?output=js&q=%s';
+use constant LQ => 'http://maps.google.com/maps?output=js&v=1&q=%s';
 
 #this gets a javascript page containing map XML.  special for "nearby" searches
-use constant NQ => 'http://maps.google.com/maps?output=js&near=%s&q=%s';
+use constant NQ => 'http://maps.google.com/maps?output=js&v=1&near=%s&q=%s';
 
 #used in polyline codec
 use constant END_OF_STREAM => 9999;
