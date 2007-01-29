@@ -4,7 +4,7 @@ lib/Geo/Google/Location.pm
 lib/Geo/Google/Path.pm
 lib/Geo/Google/Segment.pm
 Makefile.PL
-MANIFEST
+MANIFEST			This list of files
+META.yml
 README
 t/Geo-Google.t
-META.yml                                 Module meta-data (added by MakeMaker)

@@ -3,4 +3,32 @@ Revision history for Perl extension Geo::Google.
 0.01  Mon May 23 22:05:45 2005
 	- original version; created by h2xs 1.23 with options
 		-Xn Geo::Google
-
+0.03  Sun Jan 7 10:21:00 2007
+        - Google switched their Maps server response from XML
+            to JSON.  Changed the Geo::Google response parsing
+            from XML to google's JSON data structure.
+        - changed the toString() functions of these objects to
+            toXML() functions:
+               Geo::Google::Location
+               Geo::Google::Segment
+               Geo::Google::Path
+	- Added a toJSON() function to these objects:
+               Geo::Google::Location
+               Geo::Google::Path
+        - Added private function _JSONRenderSkeleton() to support
+            the new toJSON() functions of location and path objects
+        - Simplified control loops for directions segment parsing
+        - Added support for waypoints in directions queries and
+            Geo::Google::Path objects
+        - Updated the test script
+        - Added the levels() and panel() methods of the 
+	    Geo::Google::Path object to allow JSON rendering that 
+	    should be interchangeable with Google Maps' JSON response
+        - Added a locations() method of the Geo::Google::Path
+            object, allowing you to access any array of all 
+	    locations used in the directions query after it has 
+	    been executed
+	- Expanded error handling to include more checks during the 
+	    query process, added new error messages, and re-wrote 
+	    some existing error messages for clarity
+	- Added detailed test failure reporting to t/Geo-Google.t

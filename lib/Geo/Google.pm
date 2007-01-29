@@ -8,10 +8,12 @@ Geo::Google - Perform geographical queries using Google Maps
   use Data::Dumper;
   use Geo::Google;
 
-  #My office
+  #Allen's office
   my $gonda_addr = '695 Charles E Young Dr S, Westwood, CA 90024';
   #Stan's Donuts
   my $stans_addr = '10948 Weyburn Ave, Westwood, CA 90024';
+  #Roscoe's House of Chicken and Waffles
+  my $roscoes_addr = "5006 W Pico Blvd, Los Angeles, CA";
 
   #Instantiate a new Geo::Google object.
   my $geo = Geo::Google->new();
@@ -21,15 +23,18 @@ Geo::Google - Perform geographical queries using Google Maps
   #about the locus.
   my ( $gonda ) = $geo->location( address => $gonda_addr );
   my ( $stans ) = $geo->location( address => $stans_addr );
+  my ( $roscoes ) = $geo->location( address => $roscoes_addr );
   print $gonda->latitude, " / ", $gonda->longitude, "\n";
   print $stans->latitude, " / ", $stans->longitude, "\n";
+  print $roscoes->latitude, " / ", $roscoes->longitude, "\n";
 
-  #Create a Geo::Google::Path object.
-  my ( $donut_path ) = $geo->path($gonda,$stans);
+  #Create a Geo::Google::Path object from $gonda to $roscoes
+  #by way of $stans.
+  my ( $donut_path ) = $geo->path($gonda, $stans, $roscoes);
 
   #A path contains a series of Geo::Google::Segment objects with
   #text labels representing turn-by-turn driving directions between
-  #the two loci.
+  #two or more locations.
   my @segments = $donut_path->segments();
 
   #This is the human-readable directions for the first leg of the
@@ -56,6 +61,12 @@ Geo::Google - Perform geographical queries using Google Maps
                               +
                             ($_->latitude - $stans->latitude)**2
                            ), $_ ] } @coffee;
+
+  # Export a location as XML for part of a Google Earth KML file
+  my $strStansDonutsXML = $stans->toXML();
+ 
+  # Export a location as JSON data to use with Google Maps
+  my $strRoscoesJSON = $roscoes->toJSON();
 
 =head1 DESCRIPTION
 
@@ -91,11 +102,14 @@ query terms.
 
 =head1 AUTHOR
 
-Allen Day <allenday@ucla.edu>
+Allen Day E<lt>allenday@ucla.eduE<gt>, Michael Trowbridge 
+E<lt>michael.a.trowbridge@gmail.comE<gt>
 
-Copyright (c) 2004-2005 Allen Day. All rights reserved. This program is
-free software; you can redistribute it and/or modify it under the same
-terms as Perl itself.
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (c) 2004-2007 Allen Day.  All rights
+reserved. This program is free software; you can redistribute it 
+and/or modify it under the same terms as Perl itself.
 
 =head1 BUGS / TODO
 
@@ -107,6 +121,12 @@ send a patch.  Known bugs/issues:
 =item Polyline decoding needs to be cleaned up. 
 
 =item Lack of documentation.
+
+JSON exporting is not exactly identical to the original Google 
+JSON response.  Some of the Google Maps-specific data is discarded 
+during parsing, and the perl JSON module does not allow for bare keys 
+while exporting to a JSON string.  It should still be functionally 
+interchangeable with a Google JSON reponse.
 
 =back
 
@@ -120,8 +140,7 @@ send a patch.  Known bugs/issues:
 
 package Geo::Google;
 use strict;
-use warnings;
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 #this gets a javascript page containing map XML
 use constant LQ => 'http://maps.google.com/maps?output=js&v=1&q=%s';
@@ -132,12 +151,15 @@ use constant NQ => 'http://maps.google.com/maps?output=js&v=1&near=%s&q=%s';
 #used in polyline codec
 use constant END_OF_STREAM => 9999;
 
+#external libs
 use Data::Dumper;
 use Digest::MD5 qw( md5_hex );
+use HTML::Entities;
+use JSON;
 use LWP::Simple;
 use URI::Escape;
-use XML::DOM;
-use XML::DOM::XPath;
+
+#our libs
 use Geo::Google::Location;
 use Geo::Google::Path;
 use Geo::Google::Segment;
@@ -215,43 +237,43 @@ sub location {
 
   my $address   = $arg{'address'} or ($self->error("must provide an address to location()") and return undef);
 
+  my $json = new JSON (skipinvalid => 1, barekey => 1, 
+			quotapos => 1, unmapping => 1 );
+  my $response_json = undef;
   my $page = get( sprintf( LQ, uri_escape($address) ) );
-  $page =~ m!(<page.+/page>)!;
-  my $parser = XML::DOM::Parser->new();
-  my $dom = $parser->parse( $1 );
 
-  # error of some sort
-  if ( my ( $node ) = $dom->findnodes('//error') ) {
-    my $error = $node->toString();
-    #pretty-print error
-    $error =~ s!</?b>!'!gs;
-    $error =~ s!</p>!\n!gs;
-    $error =~ s!</li>!\n!gs;
-    $error =~ s!<li>!  -!gs;
-    $error =~ s!<.+?>!!gs;
-    $error = _html_unescape($error);
-    $self->error( $error );
+  # See if google returned no results
+  if ( $page =~ /did\snot\smatch\sany\slocations/i ) {
+    $self->error( "Google couldn't match any locations matching "
+	. "$address.");
     return undef;
   }
-  # ambiguous input
-  elsif ( my @nodes = $dom->findnodes('//refinements//i') ) {
-    $self->error( "Your query for '$address' must be refined, it returned ".
-         scalar(@nodes).":\n".
-         join("\n", map { "  -"._html_unescape($_->getFirstChild->toString()) } @nodes)
-    );
-    return undef;
+  # attept to locate the JSON formatted data block
+  elsif ($page =~ 	
+	/loadVPage\((.+),document\.getElementById\(/is) {
+	my $strJSON = $1;
+	$response_json = $json->jsonToObj($strJSON);
+	}
+  else {
+	$self->error( "Unable to locate the JSON format data in " 
+		. "google's response.");
+	return undef;
+	}
+
+  if ( scalar(@{$response_json->{"overlays"}->{"markers"}}) > 0 ) {
+	my @result = ();
+	foreach my $marker (@{$response_json->{"overlays"}->{"markers"}}) {
+		my $loc = $self->_obj2location($marker, %arg);
+		push @result, $loc;
+	}		
+  	return @result;
   }
-
-  my @result = ();
-  if ( my ( @nodes ) = $dom->findnodes('//location') ) {
-    my $i = 0;
-    foreach my $node ( @nodes ) {
-#warn $node;
-      my $loc = $self->_xml2location($node,%arg);
-      push @result, $loc;
-    }
-
-    return @result;
+  else {
+	$self->error("Found the JSON Data block and was "
+		. "able to parse it, but it had no location markers "
+		. "in it.  Maybe Google changed their "
+		. "JSON data structure?.");
+	return undef;
   }
 }
 
@@ -271,149 +293,273 @@ sub location {
 sub near {
   my ( $self, $where, $query ) = @_;
   my $page = get( sprintf( NQ, join(',', $where->lines ), $query ) );
-  $page =~ m!(<page.+/page>)!;
-  my $parser = XML::DOM::Parser->new();
-  my $dom = $parser->parse( $1 );
+  
+  my $json = new JSON (skipinvalid => 1, barekey => 1, 
+			quotapos => 1, unmapping => 1 );
+  my $response_json = undef;
 
-  my @result = ();
-  if ( my ( @nodes ) = $dom->findnodes('//location') ) {
-    my $i = 0;
-    foreach my $node ( @nodes ) {
-      $i++;
-      my $loc = $self->_xml2location($node);
-      push @result, $loc;
-    }
+  # See if google returned no results
+  if ( $page =~ /did\snot\smatch\sany\slocations/i ) {
+    $self->error( "Google couldn't find a $query near " . $where->title);
+    return undef;
+  }
+  # attept to locate the JSON formatted data block
+  elsif ($page =~ 	
+	/loadVPage\((.+),document\.getElementById\(/is) {
+	my $strJSON = $1;
+	$response_json = $json->jsonToObj($strJSON);
+	}
+  else {
+	$self->error( "Unable to locate the JSON format data in " 
+		. "google's response.");
+	return undef;
+	}
 
-    return @result;
+  if ( scalar(@{$response_json->{"overlays"}->{"markers"}}) > 0 ) {
+	my @result = ();
+	foreach my $marker (@{$response_json->{"overlays"}->{"markers"}}) {
+		my $loc = $self->_obj2location($marker);
+		push @result, $loc;
+	}		
+  	return @result;
+  }
+  else {
+	$self->error("Found the JSON Data block and was "
+		. "able to parse it, but it had no location markers"
+		. "in it.  Maybe Google changed their "
+		. "JSON data structure?");
+	return undef;
   }
 }
 
 =head2 path()
 
- Usage    : my $path = $geo->path( $from, $to );
+ Usage    : my $path = $geo->path( $from, $OptionalWaypoints, $to );
  Function : get driving directions between two points
  Returns  : a Geo::Google::Path object
  Args     : 1. a Geo::Google::Location object (from)
-            2. a Geo::Google::Location object (to)
+	    2. optional Geo::Google::Location waypoints
+            3. a Geo::Google::Location object (final destination)
 
 =cut
 
 sub path {
-  my ( $self, $s, $d ) = @_;
+  my ( $self, @locations ) = @_;
+  my $json = new JSON (skipinvalid => 1, barekey => 1, 
+			quotapos => 1, unmapping => 1 );
+  my $response_json = undef;
 
-  if( !defined($s) or !defined($d) ) {
-    $self->error("either source ('$s') or destination ('$d') is not defined");
+  if(scalar(@locations) < 2) {
+    $self->error("Less than two locations were passed to the path function");
     return undef;
   }
-  elsif( (!$s->isa('Geo::Google::Location')) or (!$d->isa('Geo::Google::Location')) ) {
-    $self->error("either source ('$s') or destination ('$d') is not a Geo::Google::Location object, or subclass thereof");
+  #check each @locations element to see if it is a Geo::Google::Location
+  for (my $i=0; $i<=$#locations; $i++) {
+	if(!$locations[$i]->isa('Geo::Google::Location')) {
+	    $self->error("Location " . ($i+1)
+			. " passed to the path function is not a "
+			. "Geo::Google::Location"
+			. " object, or subclass thereof");
+	    return undef;
+	}
+  }
+
+  # construct the google search text
+  my $googlesearch = "from: " . join(', ', $locations[0]->lines);
+  for (my $i=1; $i<=$#locations; $i++){
+	$googlesearch .= " to:" . join(', ', $locations[$i]->lines);
+  }
+
+  my $page = get( sprintf( LQ, uri_escape( $googlesearch ) ) );
+
+  # See if google returned no results
+  if ( $page =~ /did\snot\smatch\sany\slocations/i ) {
+    $self->error( "Google couldn't find one of the locations"
+		. " you provided for your directions query");
     return undef;
   }
+  # attept to locate the JSON formatted data block
+  elsif ($page =~ 	
+	/loadVPage\((.+),document\.getElementById\(/is) {
+	my $strJSON = $1;
+
+	# Extract the JSON data structure from the response.
+	$response_json = $json->jsonToObj($strJSON);
+	}
   else {
-    my $s_address = join(', ',$s->lines);
-    my $d_address = join(', ',$d->lines);
+	$self->error( "Unable to locate the JSON format data in " 
+		. "google's response.");
+	return undef;
+  }
 
-    my $parser = XML::DOM::Parser->new();
+  my $enc_points = $response_json->{"overlays"}->{"polylines"}->[0]->{"points"};
+  my @points = _decode($enc_points);
 
-    my $page = get( sprintf( LQ, uri_escape("$s_address to $d_address") ) );
-    $page =~ m!(<page.+/page>)!;
+  # extract a series of directions from HTML inside the panel 
+  # portion of the JSON data response, stuffing them in @html_segs
+  my @html_segs;
+  my $stepsfound = 0;
 
-    my $dom = $parser->parse( $1 );
+  my $panel = $response_json->{'panel'};
+  $panel =~ s/&#160;/ /g;
 
-    my $enc_points = $dom->findnodes('//polyline/points');
-    my $total = $dom->findnodes('//segments')->get_node(1);
+  my @subpaths = $panel =~ m#(<table class=042(ddrsteps pw|ddwpt_table)042.+?</table>\s*</div>)#gs; #ddspt_table
+  #my ( $subpanel ) = $response_json->{'panel'} =~ m#<table class=042ddrsteps pw042>(.+)</table>#s;
 
-    my @nodes = ( $s );
-    my @segs = $dom->findnodes('//segment');
+  foreach my $subpath ( @subpaths ) {
+    my @segments = split m#</tr>\s*<tr#s, $subpath;
+    foreach my $segment ( @segments ) {
+      #skip irrelevant waypoint rows
+      if ( $subpath =~ m#ddwpt_table#s && $segment !~ m#ddptlnk#s ) { next }
 
-    my @points = _decode($enc_points);
+      my ( $id )         = $segment =~ m#id=042(.+?)042#s;
+      my ( $pointIndex ) = $segment =~ m#polypoint=042(.+?)042#s;
+      my ( $html )       = $segment =~ m#042dirsegtext042>(.+?)</td>#s;
+      my ( $distance )   = $segment =~ m#042sdist042>.*?<b>(.+?)</b>.*?</td>#s;
+      my ( $time )       = $segment =~ m#042segtime pw042>(.+?)<#s;
 
+      if ( ! defined( $id ) ) {
+        if ( $subpath =~ m#waypoint=042(.+?)042#s ) {
+          $id = "waypoint_$1";
+        }
+      }
 
-#warn scalar(@segs);
-#warn scalar(@points);
-#warn $enc_points;
+      next unless $id;
 
-#warn join "\n", map {$_->toString} @segs;
+      if ( ! $html ) {
+        #destinations/waypoints are different
+        ( $html ) = $segment =~ m#042milestone042.+?>(.+?)<td class=042closer#s;
+      }
 
-    my $last_point = undef;
-    my $last_seg = undef;
-    my @segments = ();
-    my @points_subset = ();
-    my $m = 0;
-    while ( @points ) {
+      if ( ! $time ) {
+        #some segments are different (why? what is the pattern?)
+        my ( $d2, $t2 ) = $segment =~ m#timedist ul.+?>(.+?)\(about&\#160;(.+?)\)</td>#s;
+        $time = $t2;
+        $distance ||= $d2;
+      }
+
+      #some segments have no associated point, e.g. when there are long-distance driving segments
+
+      #some segments have time xor distance (not both)
+      $distance   ||= ''; $distance = decode_entities( $distance ); $distance =~ s/\s+/ /g;
+      $time       ||= ''; $time     = decode_entities( $time     ); $time =~ s/\s+/ /g;
+
+#print
+#"$id
+#	$pointIndex
+#	$distance
+#	$time
+#	$html
+#
+#";
+#warn
+
+      push (@html_segs, {
+        distance   => $distance,
+        time       => $time,
+        pointIndex => $pointIndex,
+        id         => $id,
+        html       => $html
+      });
+      $stepsfound++;
+    }
+  }
+#die;
+
+  if ($stepsfound == 0) {
+	$self->error("Found the HTML directions from the JSON "
+			. "reponse, but was not able to extract "
+			. "the driving directions from the HTML");
+	return undef;
+  }
+  my @segments = ();
+  # The first point in the first segment should be the start point, 
+  # but google doesn't include that in their polyline, so I compensate
+  my @points_subset = ( $locations[0] );
+  my $m = -1;
+  #  Correlate the array of lats and longs we decoded from the 
+  # JSON object with the segments we extracted from the panel 
+  # HTML and put the result into an array of
+  # Geo::Google::Location objects 
+  while ( @points ) {
       my $lat = shift @points;
       my $lon = shift @points;
       $m++;
 
-      if ( ! $last_point ) {
-        $last_point = Geo::Google::Location->new(
+      my %html_seg;
+
+      my $point = Geo::Google::Location->new(
           latitude  => $lat,
           longitude => $lon,
         );
-        push @points_subset, $last_point;
 
-        if ( $m-1 == $segs[0]->getAttribute('pointIndex') ) {
-#warn "new segment at: ".($m-1);
-          my $seg = shift @segs;
-          push @segments, Geo::Google::Segment->new(
-            points     => \@points_subset,
-            from       => $last_point,
-            to         => $last_point,
-            distance   => $seg->getAttribute('distance'),
-            meters     => $seg->getAttribute('meters'),
-            seconds    => $seg->getAttribute('seconds'),
-            time       => $seg->getAttribute('time'),
-            pointIndex => $seg->getAttribute('pointIndex'),
-            id         => $seg->getAttribute('id'),
-            text       => join '', map { _html_unescape($_->toString) } $seg->getChildNodes,
-          );
-          @points_subset = ();
-        }
-        next;
-      }
-
-      my $point = Geo::Google::Location->new(
-        latitude  => $lat,
-        longitude => $lon,
-      );
       push @points_subset, $point;
 
-      my $seg = undef;
-      if ( $segs[0] ) {
-        next unless $m-1 == $segs[0]->getAttribute('pointIndex');
-        $seg = shift @segs;
+      if ( $html_segs[1] ) { 
+	# There's a segment after the one we're working on
+	# This tests to see if we need to wrap up the current segment
+        if ( defined( $html_segs[1]{'pointIndex'} ) ) {
+          next unless $m + 1 == $html_segs[1]{'pointIndex'};
+        }
+
+        %html_seg = %{shift @html_segs};
 
         push @segments, Geo::Google::Segment->new(
-          points     => [@points_subset],
-          from       => $last_point,
+          pointIndex => $html_seg{'pointIndex'},
+          id         => $html_seg{'id'},
+          html       => decode_entities($html_seg{"html"}),
+          distance   => $html_seg{'distance'},
+          time       => $html_seg{'time'},
+          from       => $points_subset[0],
           to         => $point,
-          distance   => $seg->getAttribute('distance'),
-          meters     => $seg->getAttribute('meters'),
-          seconds    => $seg->getAttribute('seconds'),
-          time       => $seg->getAttribute('time'),
-          pointIndex => $seg->getAttribute('pointIndex'),
-          id         => $seg->getAttribute('id'),
-          text       => join '', map { _html_unescape($_->toString) } $seg->getChildNodes,
+          points     => [@points_subset]
         );
-      } else {
-        push @{ $segments[0]->{points} }, $point;
+        @points_subset = ();
+      } elsif ($html_segs[0]) { # We're working on the last segment
+	# This tests to see if we need to wrap up the last segment
+         next unless (! $points[0]);
+         %html_seg = %{shift @html_segs};
+         push @segments, Geo::Google::Segment->new(
+            pointIndex => $html_seg{'pointIndex'},
+            id         => $html_seg{'id'},
+            html       => decode_entities($html_seg{"html"}),
+            distance   => $html_seg{'distance'},
+            time       => $html_seg{'time'},
+            from       => $points_subset[0],
+            to         => $locations[$#locations],
+            points     => [@points_subset]
+          );
+          @points_subset = ();
+      } else { # we accidentally closed out the last segment early
+          push @{ $segments[$#segments]->{points} }, $point;
       }
+  }
+  # The last point in the last segment should be the final 
+  # destination, but google doesn't put that in the polyline.
+  push @{ $segments[$#segments]->{points} }, $locations[$#locations];
+    
 
-      $last_point = $point;
-      $last_seg = $seg;
-      @points_subset = ();
-    }
+  # Extract the total information using a regex on the panel hash
+  # At the end of the "printheader", we're looking for:
+  # 282&#160;mi&#160;(about&#160;4 hours 27 mins)</td></tr></table>
+  if ($response_json->{"printheader"} =~
+		/(\d+\.?\d*)\&\#160;(mi|km|m)\&\#160;\(about\&\#160;(.+?)\)<\/td><\/tr><\/table>$/s){
+	my $path = Geo::Google::Path->new(
+	   segments  => \@segments,
+	   distance  => $1 . " " . $2,
+	   time      => $3,
+	   polyline  => $enc_points,
+	   locations => [ @locations ],
+	   panel     => $response_json->{"panel"},
+	   levels    => $response_json->{"overlays"}->{"polylines"}->[0]->{"levels"}
+					);
 
-    my $path = Geo::Google::Path->new(
-      segments  => \@segments,
-      meters    => $total->getAttribute('meters'),
-      seconds   => $total->getAttribute('seconds'),
-      distance  => $total->getAttribute('distance'),
-      time      => $total->getAttribute('time'),
-      polyline  => $enc_points,
-    );
-
-    return $path;
+	return $path;
+  } else {
+	$self->error("Could not extract the total route distance "
+			. "and time from google's directions");
+	return undef;
+  }
 
 #$Data::Dumper::Maxdepth=6;
 #warn Dumper($path);
@@ -422,9 +568,6 @@ sub path {
 #  <segment distance="0.4&#160;mi" id="seg0" meters="593" pointIndex="0" seconds="38" time="38 secs">Head <b>southwest</b> from <b>Venice Blvd</b></segment>
 #  <segment distance="0.2&#160;mi" id="seg1" meters="272" pointIndex="6" seconds="18" time="18 secs">Make a <b>U-turn</b> at <b>Venice Blvd</b></segment>
 #</segments>
-    push @nodes, $d;
-    return @nodes;
-  }
 }
 
 =head1 INTERNAL FUNCTIONS AND METHODS
@@ -581,50 +724,62 @@ sub _html_unescape {
   return $raw;
 }
 
-=head2 _xml2location()
+=head2 _obj2location()
 
- Usage    : my $loc = _xml2location($xml);
- Function : converts a Google Maps XML document to a Geo::Google::Location object
+ Usage    : my $loc = _obj2location($obj);
+ Function : converts a perl object generated from a Google Maps 
+		JSON response to a Geo::Google::Location object
  Returns  : a Geo::Google::Location object
- Args     : a Google Maps XML document.
+ Args     : a member of the $obj->{overlays}->{markers}->[] 
+		anonymous array that you get when you read google's 
+		JSON response and parse it using JSON::jsonToObj()
 
 =cut
 
-sub _xml2location {
-  my ( $self, $node, %arg ) = @_;
+sub _obj2location {
+  my ( $self, $marker, %arg ) = @_;
 
-  my $lat = $node->findnodes('point')->get_node(1)->getAttribute('lat');
-  my $lng = $node->findnodes('point')->get_node(1)->getAttribute('lng');
-  my @lines = map { _html_unescape($_->getFirstChild->toString()) } ( $node->findnodes('info/address//line') );
-#FIXME
-
+  my @lines;
   my $title;
-  #differs if performing a "near" search.
-  if ( $node->findnodes('info/title') ) {
-#warn "has title";
-    ( $title ) = $node->findnodes('info/title')->get_node(1)->toString =~ m!.+?>(.+)<!; #yeah, i know.
+  my $description;
+  # Check to make sure that the info window contents are HTML
+  # and that google hasn't changed the format since I wrote this
+  if ( $marker->{"infoWindow"}->{"type"} eq "html" ) {
+	if ($marker->{"laddr"} =~ 
+		/\((.+)\)\s\@\-?\d+\.\d+,\-?\d+\.\d+$/s){
+		$title = $1;
+	}
+	else {
+		$title = $marker->{"laddr"};
+	}
+
+	$description = decode_entities($marker->{"infoWindow"}->{"basics"});
+	# replace </P>, <BR>, <BR/> and <BR /> with newlines
+	$description =~ s/<\/p>|<br\s?\/?>/\n/gi;
+	# remove all remaining markup tags
+	$description =~ s/<.+>//g;
   }
   else {
-    ( $title ) = $node->findnodes('info')->get_node(1)->toString =~ m!.+?>(.+)<!; #yeah, i know.
-  }
-
-
-#unshift @lines, $title;
+	# this is a non-fatal nuisance error, only lat/long are 
+	# absolutely essential products of this function
+    $title = "Could not extract a title or description from "
+	. "google's response.  Have they changed their format since "
+	. "this function was written?";
+  }  
 
   my $loc = Geo::Google::Location->new(
-    title     => _html_unescape($title),
-    latitude  => $lat,
-    longitude => $lng,
-    lines     => [@lines],
-    id        => $node->getAttribute('id')
+    title     => $title,
+    latitude  => $marker->{"lat"},
+    longitude => $marker->{"lng"},
+    lines     => [split(/\n/, $description)],
+    id        => $marker->{"id"}
                  || $arg{'id'}
                  || md5_hex( localtime() ),
-    infostyle => $node->getAttribute('infoStyle')
-                 || $arg{'icon'}
+    infostyle => $arg{'icon'}
                  || 'http://maps.google.com/mapfiles/marker.png',
-    icon      => $node->findnodes('icon')->get_node(1)->getAttribute('image')
+    icon      => "http://maps.google.com" . $marker->{"image"}
                  || $arg{'infoStyle'}
-                 || 'http://maps.google.com/maps?file=gi&amp;hl=en',
+                 || 'http://maps.google.com/mapfiles/arrow.png'
   );
   return $loc;
 
@@ -651,6 +806,70 @@ qq(
       </info>
     </location>
 );
+}
+
+=head2 _JSONrenderSkeleton()
+
+ Usage    : my $perlvariable = _JSONrenderSkeleton();
+ Function : creates the skeleton of a perl data structure used by 
+		the Geo::Google::Location and Geo::Google::Path for 
+		rendering to Google Maps JSON format
+ Returns  : a mildly complex multi-level anonymous hash/array 
+		perl data structure that corresponds to the Google 
+		Maps JSON data structure
+ Args     : none
+
+=cut
+
+sub _JSONrenderSkeleton{
+	# This data structure is based on a sample query
+	# performed on 27 Dec 06 by Michael Trowbridge
+	return {
+          'urlViewport' => 0,
+          'ei' => '',
+          'form' => {
+                      'l' => {
+                               'q' => '',
+                               'near' => ''
+                             },
+                      'q' => {
+                               'q' => ''
+                             },
+                      'd' => {
+                               'saddr' => '',
+                               'daddr' => '',
+                               'dfaddr' => ''
+                             },
+                      'selected' => ''
+                    },
+          'overlays' => {
+                          'polylines' => [],
+                          'markers' => [],
+                          'polygons' => []
+                        },
+          'printheader' => '',
+          'modules' => [
+                         undef
+                       ],
+          'viewport' => {
+                          'mapType' => '',
+                          'span' => {
+                                      'lat' => '',
+                                      'lng' => ''
+                                    },
+                          'center' => {
+                                        'lat' => '',
+                                        'lng' => ''
+                                      }
+                        },
+          'panelResizeState' => 'not resizeable',
+          'ssMap' => {
+                       '' => ''
+                     },
+          'vartitle' => '',
+          'url' => '/maps?v=1&q=URI_ESCAPED_QUERY_GOES_HERE&ie=UTF8',
+          'title' => ''
+        };
 }
 
 1;

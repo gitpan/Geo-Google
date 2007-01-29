@@ -3,10 +3,10 @@ use strict;
 use warnings;
 use Data::Dumper;
 use URI::Escape;
-our $VERSION = '0.01';
+our $VERSION = '0.03';
 
 use constant FMT => <<_FMT_;
-<segment distance="%s" id="%s" meters="%s" pointIndex="%s" seconds="%s" time="%s">%s</segment>
+<segment distance="%s" id="%s" pointIndex="%s" time="%s">%s</segment>
 _FMT_
 
 sub new {
@@ -18,22 +18,19 @@ sub new {
 sub from       { return shift->{'from'} }
 sub distance   { return shift->{'distance'} }
 sub id         { return shift->{'id'} }
-sub meters     { return shift->{'meters'} }
 sub pointIndex { return shift->{'pointIndex'} }
 sub points     { my $self = shift; return $self->{'points'} ? @{ $self->{'points'} } : () }
-sub seconds    { return shift->{'seconds'} }
-sub text       { return shift->{'text'} }
+sub html       { return shift->{'html'} }
+sub text       { my $self = shift; $_ = $self->html(); s#<script.+?</script##g; s#<.+?># #g; s#\s+# #g; s# ([,:])#$1#g; s#^\s*(.+?)\s*$#$1#; $_ }
 sub time       { return shift->{'time'} }
 sub to         { return shift->{'to'} }
 
-sub toString {
+sub toXML {
   my $self = shift;
   return sprintf( FMT,
     $self->distance(),
     $self->id(),
-    $self->meters(),
     $self->pointIndex(),
-    $self->seconds(),
     $self->time(),
     $self->text(),
   );
@@ -67,28 +64,35 @@ on a Geo::Google instance.  The return value is a Geo::Google::Path object,
 which is a composite of Geo::Google::Segment objects, which are in turn
 composites of Geo::Google::Location objects.
 
+In Google Earth, they're used as XML inside a .KML file or xml 
+server response.  Individual segments are used in Google Maps as 
+HTML with JavaScript inside a JSON response from the server.  
+The JSON structure used by Google Maps doesn't actually contain 
+segments.  They are implied by the HTML in the "panel" portion of 
+the response and activate JavaScript that re-renders the map window 
+after extracting coordinates from the polyline object. 
+
+
 =head1 OBJECT METHODS
 
-Geo::Google::Location objects provide the following accessor methods
+Geo::Google::Segment objects provide the following accessor methods
 
  Method      Description
  ------      -----------
  from        a Geo::Google::Location at the beginning of the segment.
  distance    length of the segment, in variable, human friendly units.
  id          a unique identifier for this point.
- meters      length of the segment, in meters.
  pointIndex  the offset, in 0-based points, at which the segment begins
              relative to the start of the path.
  points      a list of Geo::Google::Location points along the segment.
- seconds     a time estimate, in seconds, for how long the segment will
-             take to travel by automobile.
- text        a description of the segment, typically some human-readable
+ html        a description of the segment, typically some human-readable
              description of this leg of a path, e.g "make a u-turn at
              McLaughlin Ave".
+ text        a scrubbed version of the html() function's output
  time        a time estimate, in variable, human-friendly units for how long
              the segment will take to travel by automobile.
  to          a Geo::Google::Location at the end of the segment.
- toString    a method that renders the segment in Google Maps XML format.
+ toXML       a method that renders the segment in XML that could be used as part of a Google Earth KML file.
 
 =head1 SEE ALSO
 
@@ -96,14 +100,13 @@ L<Geo::Google>
 
 =head1 AUTHOR
 
-Allen Day, E<lt>allenday@ucla.eduE<gt>
+Allen Day E<lt>allenday@ucla.eduE<gt>, Michael Trowbridge 
+E<lt>michael.a.trowbridge@gmail.comE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2005 by Allen Day
-
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself, either Perl version 5.8.3 or,
-at your option, any later version of Perl 5 you may have available.
+Copyright (c) 2004-2007 Allen Day.  All rights
+reserved. This program is free software; you can redistribute it
+and/or modify it under the same terms as Perl itself.
 
 =cut
