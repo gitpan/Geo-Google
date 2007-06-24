@@ -5,7 +5,7 @@ use Data::Dumper;
 use URI::Escape;
 use JSON;
 use Geo::Google;
-our $VERSION = '0.03';
+our $VERSION = '0.04-rc3';
 
 use constant FMT => <<_FMT_;
 <location infoStyle="%s" id="%s">

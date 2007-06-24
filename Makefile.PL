@@ -7,7 +7,7 @@ WriteMakefile(
     PREREQ_PM         => {
 Digest::MD5     => 0.0,
 HTML::Entities  => 0.0,
-JSON		=> 0.0,
+JSON		=> 1.12,
 LWP::Simple     => 0.0,
 URI::Escape     => 0.0,
                          }, # e.g., Module::Name => 1.1

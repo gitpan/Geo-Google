@@ -4,7 +4,7 @@ use warnings;
 use Data::Dumper;
 use URI::Escape;
 use Geo::Google;
-our $VERSION = '0.03';
+our $VERSION = '0.04-rc3';
 
 use constant FMT => <<_FMT_;
 <segments distance="%s" time="%s">
@@ -32,7 +32,7 @@ sub levels   { return shift->{'levels'} }
 
 sub toXML {
   my $self = shift;
-  my $content = join "", map { $_->toXML } @{ $self->segments };
+  my $content = join "", map { $_->toXML } @{ $self->{segments} };
   return sprintf( FMT,
     $self->distance(),
     $self->time(),

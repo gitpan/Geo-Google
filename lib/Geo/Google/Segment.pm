@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use Data::Dumper;
 use URI::Escape;
-our $VERSION = '0.03';
+our $VERSION = '0.04-rc3';
 
 use constant FMT => <<_FMT_;
 <segment distance="%s" id="%s" pointIndex="%s" time="%s">%s</segment>
