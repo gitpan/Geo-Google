@@ -130,3 +130,11 @@ Revision history for Perl extension Geo::Google.
   - Minor code beautification
   - Adjusted test script to match slight changes in Google's data
   - Test script now prints specific error messages when it fails some tests
+0.05-rc1 (MAT)
+  - Updated total directions length parsing to reflect Google's recent 
+    display format change
+  - Re-wrote test script to only test lat/long of Geo::Google::Location objects
+    that don't come from a polyline to the nearest hundred-thousandth of a
+    degree.  In most cases, this difference is a matter of inches on the ground.
+      - Should prevent needless test script changes every time Google gets
+	a database update from Navteq

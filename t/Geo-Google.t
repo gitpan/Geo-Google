@@ -15,10 +15,11 @@ use strict;
 use Data::Dumper;
 use Geo::Google;
 use JSON;
+use constant TOLERANCE => "%3.5f"; # only test lat/long coordinates to the nearest hundred-thousandth of a degree
 
 ok( my $geo  = Geo::Google->new()                            , "Instantiated a new Geo::Google object" );
 is( ref( $geo ), 'Geo::Google'                               , "Object type okay" );
-is( $geo->version(), '0.04-rc6'                              , "Check Geo::Google version number" );
+is( $geo->version(), '0.05'                              , "Check Geo::Google version number" );
 
 is( Geo::Google::_encode_word(34.06698), "su|nE"	     , "_encode_word static unit test: 34.06698 encodes to 'su|nE'" );
 is( Geo::Google::_encode_word(-118.44442), "rt|qU"	     , "_encode_word static unit test: -118.44442 encodes to 'rt|qU'" );
@@ -36,8 +37,8 @@ ok( my @suggested_locations = $geo->location( address => $bad_address ), "Execut
 isnt( $suggested_locations[0], undef,			     , "The \$geo->location() query for the bad address didn't error out" );
 warn $geo->error() unless defined( $suggested_locations[0] ); # print the specific reason it errored out
 is( scalar( @suggested_locations ), 2			     , "Google suggested exactly two alternate addresses" );
-is( $suggested_locations[0]->latitude(), "34.066978"          , "...first suggested alternate address latitude okay"    );
-is( $suggested_locations[0]->longitude(), "-118.44442"      , "...first suggested alternate address longitude okay"   );
+is( sprintf( TOLERANCE, $suggested_locations[0]->latitude() ) ,   34.06698, "...first suggested alternate address latitude okay"    );
+is( sprintf( TOLERANCE, $suggested_locations[0]->longitude() ), -118.44442, "...first suggested alternate address longitude okay"   );
 
 ok( my $add1 = '695 Charles E Young Dr S, Los Angeles, Los Angeles, California 90024, United States', "Dept. of Human Genetics, UCLA" );
 ok( my $add2 = '10948 Weyburn Ave, Westwood, CA 90024'       , "Stan's Donuts"  );
@@ -47,16 +48,16 @@ ok( my $add3 = '5006 W Pico Blvd, Los Angeles, CA 90019'     , "Roscoe's House o
 #along with a few other details about the locus.
 ok( my ($loc1) = $geo->location( address => $add1 )          , "loc1 on the map"     );
 isnt( $loc1, undef                                           , "...and defined"      );
-is( $loc1->latitude(), "34.066978"                            , "...latitude okay"    );
-is( $loc1->longitude(), "-118.44442"                        , "...longitude okay"   );
+is( sprintf( TOLERANCE, $loc1->latitude()  ),   34.06698     , "...latitude okay"    );
+is( sprintf( TOLERANCE, $loc1->longitude() ), -118.44442     , "...longitude okay"   );
 ok( my ($loc2) = $geo->location( address => $add2 )          , "loc2 on the map"     );
 isnt( $loc2, undef                                           , "...and defined"      );
-is( $loc2->latitude(), "34.062511"                           , "...latitude okay"    );
-is( $loc2->longitude(), "-118.44712"                        , "...longitude okay"   );
+is( sprintf( TOLERANCE, $loc2->latitude()  ),   34.06251     , "...latitude okay"    );
+is( sprintf( TOLERANCE, $loc2->longitude() ), -118.44712     , "...longitude okay"   );
 ok( my ($loc3) = $geo->location( address => $add3 )          , "loc3 on the map"     );
 isnt( $loc3, undef                                           , "...and defined"      );
-is( $loc3->latitude(), "34.047768"                           , "...latitude okay"    );
-is( $loc3->longitude(), "-118.34615"                        , "...longitude okay"   );
+is( sprintf( TOLERANCE, $loc3->latitude()  ),   34.04777     , "...latitude okay"    );
+is( sprintf( TOLERANCE, $loc3->longitude() ), -118.34615     , "...longitude okay"   );
 
 #Create a Geo::Google::Path object from $loc1 to $loc3 via waypoint $loc2
 #A path contains a series of Geo::Google::Segment objects with text labels representing
@@ -120,8 +121,8 @@ is ( $segment->text(), 'Turn right at Weyburn Ave'          , 'segment text okay
 my @points = $segments[1]->points;
 
 is( scalar( @points ), 2                                     , 'Correct number of points in segment' );
-is( $points[1]->latitude(), '34.06694'                       , 'Point latitude okay' );
-is( $points[1]->longitude(), '-118.44512'                    , 'Point longitude okay' );
+is( $points[1]->latitude(), '34.06694'                       , 'Point latitude okay' );  #polyline points are .00001 precision, no tolerances here
+is( $points[1]->longitude(), '-118.44512'                    , 'Point longitude okay' ); #polyline points are .00001 precision, no tolerances here
 
 #Find coffee near to Stan's Donuts
 ok( my @near = $geo->near( $loc2, 'coffee' )                 , "Search for coffee near Stan's Donuts" );
@@ -140,8 +141,8 @@ my ( $coffee ) = map { $_->[1] }
                     ($_->latitude - $loc2->latitude)**2
                   ), $_ ] } @near;
 
-is( $coffee->latitude(), '34.061962'                         , 'Coffee latitude okay');
-is( $coffee->longitude(), '-118.44794'                       , 'Coffee latitude okay');
+is( sprintf( TOLERANCE, $coffee->latitude()  ),   34.06196   , 'Coffee latitude okay');
+is( sprintf( TOLERANCE, $coffee->longitude() ), -118.44795   , 'Coffee latitude okay');
 
 # Exports
 ok( my $loc2XML = $loc2->toXML()                             , "Stan's Donuts as Google Earth KML (XML) format" );

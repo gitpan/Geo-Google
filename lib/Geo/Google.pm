@@ -120,7 +120,7 @@ send a patch.  Known bugs/issues:
 
 =item Lack of documentation.
 
-JSON exporting is not exactly identical to the original Google 
+=item JSON exporting is not exactly identical to the original Google 
 JSON response.  Some of the Google Maps-specific data is discarded 
 during parsing, and the perl JSON module does not allow for bare keys 
 while exporting to a JSON string.  It should still be functionally 
@@ -138,7 +138,7 @@ interchangeable with a Google JSON reponse.
 
 package Geo::Google;
 use strict;
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 #this gets a javascript page containing map XML
 use constant LQ => 'http://maps.google.com/maps?output=js&v=1&q=%s';
@@ -581,25 +581,21 @@ sub path {
           to         => $locations[$#locations],
           points     => [ ($locations[$#locations]) ])
 	);
-  # Extract the total information using a regex on the panel hash
-  # At the end of the "printheader", we're looking for:
-  # 282&#160;mi&#160;(about&#160;4 hours 27 mins)</td></tr></table>
-  if ($response_json->{"printheader"} =~
-		/(\d+\.?\d*)\&\#160;(mi|km|m)\&\#160;\(about\&\#160;(.+?)\)<\/td><\/tr><\/table>$/s){
-	my $path = Geo::Google::Path->new(
-	   segments  => \@segments,
-	   distance  => $1 . " " . $2,
-	   time      => $3,
-	   polyline  => [ @enc_points ],
-	   locations => [ @locations ],
-	   panel     => $response_json->{"panel"},
-	   levels    => $response_json->{"overlays"}->{"polylines"}->[0]->{"levels"}
-					);
-	return $path;
+  # Extract the total information using a regex on the panel hash.  At the end of the "printheader", we're looking for:
+  # <td class="value">9.4&#160;mi &#8211; about 17 mins</td></tr></table>
+  # Replace XML numeric character references with spaces to make the next regex less dependent upon Google's precise formatting choices
+  $response_json->{"printheader"} =~ s/&#\d+;/ /g;
+  if ( $response_json->{"printheader"} =~ m#(\d+\.?\d*)\s*(mi|km|m)\s*about\s*(.+?)</td></tr></table>$#s ){
+    return Geo::Google::Path->new(
+      segments  => \@segments,
+      distance  => $1 . " " . $2,
+      time      => $3,
+      polyline  => [ @enc_points ],
+      locations => [ @locations ],
+      panel     => $response_json->{"panel"},
+      levels    => $response_json->{"overlays"}->{"polylines"}->[0]->{"levels"} );
   } else {
-	$self->error("Could not extract the total route distance "
-			. "and time from google's directions");
-	return undef;
+      $self->error("Could not extract the total route distance and time from google's directions") and return undef;
   }
 
 #$Data::Dumper::Maxdepth=6;
